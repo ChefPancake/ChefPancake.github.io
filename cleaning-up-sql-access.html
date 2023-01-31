@@ -1,0 +1,66 @@
+<html>
+    <head>
+        <link rel="stylesheet" href="styles.css">
+        <title>ChefPancake Codes</title>
+    </head>
+    <body>
+        <h1>Cleaning up SQL access code</h1>
+        <p>Code examples can be found <a href="Https://github.com/ChefPancake/BlogPostDemos/tree/main/SqlCleanupDemo">here</a>.</p>
+        <p>Often, you will write an application that needs to interface with a database, and ultimately you'll need to write an 
+            assembly to handle those interactions. You could use EntityFramework to help clean this up, but I feel like it doesn't 
+            always do everything I want it to do. I usually have to write workarounds and I end up spending a lot of time fighting
+            EF instead of just writing features. So instead, I usually write my own little SQL library that's specific to my 
+            application and is only as complicated as it needs to be.
+        </p>
+        <p>Those that have written methods that pull results from a SQL database have written something like this a hundred times:</p>
+        <p>
+            <pre><code class="language-csharp">public static IEnumerable&lt;Customer&gt; ListCustomers(string databaseName, string serverName) {
+    List&lt;Customer&gt; customers = new List&lt;Customer&gt;();
+    string cmdText = &quot;SELECT c.Id, c.FirstName, c.LastName FROM [dbo].[Customer]&quot;;
+    SqlConnectionStringBuilder builder = new SqlConnectionStringBuilder() {
+        InitialCatalog = databaseName,
+        DataSource = serverName,
+        IntegratedSecurity = true
+    };
+    using SqlConnection conn = new SqlConnection(builder.ConnectionString);
+    conn.Open();
+    using SqlCommand cmd = new SqlCommand(cmdText, conn);
+    using SqlDataReader reader = cmd.ExecuteReader();
+    if (reader.HasRows) {
+        while (reader.Read()) {
+            int id = (int)reader[0];
+            string firstName = (string)reader[1];
+            string lastName = (string)reader[2];
+            Customer customer = new Customer(id, firstName, lastName);
+            customers.Add(customer);
+        }
+    }
+    return customers;
+}
+
+public static IEnumerable&lt;Product&gt; ListProducts(string databaseName, string serverName) {
+    List&lt;Product&gt; products = new List&lt;Product&gt;();
+    string cmdText = &quot;SELECT p.Id, p.[Name], p.Price FROM [dbo].[Products] p&quot;;
+    SqlConnectionStringBuilder builder = new SqlConnectionStringBuilder() { 
+        InitialCatalog = databaseName,
+        DataSource = serverName,
+        IntegratedSecurity = true
+    };
+    using SqlConnection conn = new SqlConnection(builder.ConnectionString);
+    conn.Open();
+    using SqlCommand cmd = new SqlCommand(cmdText, conn);
+    using SqlDataReader reader = cmd.ExecuteReader();
+    if (reader.HasRows) {
+        while (reader.Read()) {
+            int id = (int)reader[0];
+            string name = (string)reader[1];
+            decimal price = (decimal)reader[2];
+            Product product = new Product(id, name, price);
+            products.Add(product);
+        }
+    }
+    return products;
+}</code></pre>
+        </p>
+    </body>
+</html>

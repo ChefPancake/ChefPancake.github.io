@@ -1,4 +1,19 @@
 body {
     margin-left: 25%;
-    margin-top: 10%;
+    margin-right:25%;
+    margin-top: 5%;
+    background-color: #262626;
+    color: #C5B8A1;
+}
+
+a:visited, a:link {
+    color: #92c5cc;
+}
+
+a:hover {
+    color: #d0e7eb;
+}
+
+p:has(+ pre) {
+    background-color: #202020;
 }
