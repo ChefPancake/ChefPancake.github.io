@@ -6,61 +6,379 @@
     <body>
         <h1>Cleaning up SQL access code</h1>
         <p>Code examples can be found <a href="Https://github.com/ChefPancake/BlogPostDemos/tree/main/SqlCleanupDemo">here</a>.</p>
-        <p>Often, you will write an application that needs to interface with a database, and ultimately you'll need to write an 
+        <p>
+            Often, you will write an application that needs to interface with a database, and ultimately you'll need to write an 
             assembly to handle those interactions. You could use EntityFramework to help clean this up, but I feel like it doesn't 
             always do everything I want it to do. I usually have to write workarounds and I end up spending a lot of time fighting
             EF instead of just writing features. So instead, I usually write my own little SQL library that's specific to my 
             application and is only as complicated as it needs to be.
         </p>
         <p>Those that have written methods that pull results from a SQL database have written something like this a hundred times:</p>
-        <p>
-            <pre><code class="language-csharp">public static IEnumerable&lt;Customer&gt; ListCustomers(string databaseName, string serverName) {
-    List&lt;Customer&gt; customers = new List&lt;Customer&gt;();
-    string cmdText = &quot;SELECT c.Id, c.FirstName, c.LastName FROM [dbo].[Customer]&quot;;
-    SqlConnectionStringBuilder builder = new SqlConnectionStringBuilder() {
+        <section>
+            <pre><code class="lang-csharp">public static IEnumerable&lt;Customer&gt; ListCustomers(
+        string databaseName, 
+        string serverName) {
+    var customers = new List&lt;Customer&gt;();
+    var cmdText = 
+        @&quot;SELECT c.Id, c.FirstName, c.LastName 
+        FROM [dbo].[Customer]&quot;;
+    var builder = new SqlConnectionStringBuilder() {
         InitialCatalog = databaseName,
         DataSource = serverName,
         IntegratedSecurity = true
     };
-    using SqlConnection conn = new SqlConnection(builder.ConnectionString);
+    using var conn = new SqlConnection(builder.ConnectionString);
     conn.Open();
-    using SqlCommand cmd = new SqlCommand(cmdText, conn);
-    using SqlDataReader reader = cmd.ExecuteReader();
+    using var cmd = new SqlCommand(cmdText, conn);
+    using var reader = cmd.ExecuteReader();
     if (reader.HasRows) {
         while (reader.Read()) {
-            int id = (int)reader[0];
-            string firstName = (string)reader[1];
-            string lastName = (string)reader[2];
-            Customer customer = new Customer(id, firstName, lastName);
+            var id = (int)reader[0];
+            var firstName = (string)reader[1];
+            var lastName = (string)reader[2];
+            var customer = new Customer(id, firstName, lastName);
             customers.Add(customer);
         }
     }
     return customers;
 }
 
-public static IEnumerable&lt;Product&gt; ListProducts(string databaseName, string serverName) {
-    List&lt;Product&gt; products = new List&lt;Product&gt;();
-    string cmdText = &quot;SELECT p.Id, p.[Name], p.Price FROM [dbo].[Products] p&quot;;
-    SqlConnectionStringBuilder builder = new SqlConnectionStringBuilder() { 
+public static IEnumerable&lt;Product&gt; ListProducts(
+        string databaseName, 
+        string serverName) {
+    var = new List&lt;Product&gt;();
+    var cmdText = 
+        @&quot;SELECT p.Id, p.[Name], p.Price 
+        FROM [dbo].[Products] p&quot;;
+    var builder = new SqlConnectionStringBuilder() { 
         InitialCatalog = databaseName,
         DataSource = serverName,
         IntegratedSecurity = true
     };
-    using SqlConnection conn = new SqlConnection(builder.ConnectionString);
+    using var conn = new SqlConnection(builder.ConnectionString);
     conn.Open();
-    using SqlCommand cmd = new SqlCommand(cmdText, conn);
-    using SqlDataReader reader = cmd.ExecuteReader();
+    using var cmd = new SqlCommand(cmdText, conn);
+    using var reader = cmd.ExecuteReader();
     if (reader.HasRows) {
         while (reader.Read()) {
-            int id = (int)reader[0];
-            string name = (string)reader[1];
-            decimal price = (decimal)reader[2];
-            Product product = new Product(id, name, price);
+            var id = (int)reader[0];
+            var name = (string)reader[1];
+            var price = (decimal)reader[2];
+            var product = new Product(id, name, price);
             products.Add(product);
         }
     }
     return products;
 }</code></pre>
+        </section>
+        <p>There's a lot of boilerplate and duplicated code in here that we can cull out.</p>
+        <h2>Deduplicating the SQL Code</h2>
+        <p>
+            Let's first start by looking at our two List methods and seeing what code is common between the two of them. The first 
+            portion is the opening of a connection. This is entirely identical between the two, so we can simply pull this out into 
+            a new method that returns an opened connection. Far too many times I forget to .Open() my connections, so using exactly
+            one method to provide opened connections eliminates that class of bug.
         </p>
+        <section>
+            <pre><code class="lang-csharp">private static SqlConnection OpenConnection(string databaseName, string serverName) {
+    SqlConnectionStringBuilder builder = new SqlConnectionStringBuilder() {
+        InitialCatalog = databaseName,
+        DataSource = serverName,
+        IntegratedSecurity = true
+    };
+    SqlConnection conn = new SqlConnection(builder.ConnectionString);
+    conn.Open();
+    return conn;
+}</code></pre>
+        </section>
+        <p>
+            Next is the building of SqlCommands. The only thing that changes between the two functions is the command text, so these 
+            can be pulled out into their own methods:
+        </p>
+        <section>
+            <pre><code class="lang-csharp">private static SqlCommand ListCustomersSqlCommand() =>
+    new SqlCommand(&quot;SELECT c.Id, c.FirstName, c.LastName FROM [dbo].[Customer] c&quot;);
+
+private static SqlCommand ListProductsSqlCommand() =>
+    new SqlCommand(&quot;SELECT p.Id, p.[Name], p.Price FROM [dbo].[Products] p&quot;);
+                </code></pre>
+        </section>
+        <p>
+            You could argue that really the only thing that changes is the sql text, not necessarily the SqlCommand itself. I like to
+            make the func param return SqlCommands because it lets consumers easily add parameters to the commands. It's not being 
+            used in this example so just wanted to call it out.
+        </p>
+        <p>
+            One thing these don't have though is binding the connection to the command. We can tackle this a couple ways, either by 
+            adding a connection parameter to each command method or by creating an extension method to bind the connection to the 
+            command and return it just to keep the code clean. I'm a big fan of extension methods, so I'll go that route.
+        </p>
+        <section>
+            <pre><code class="lang-csharp">internal static class CommandExtensions {
+    public static SqlCommand BindConnection(this SqlCommand cmd, SqlConnection conn) {
+        cmd.Connection = conn;
+        return cmd;
+    }
+}</code></pre>
+        </section>
+        <p>
+            The last thing to iron out is the reading of results. Executing the reader and accessing the results looks the same in both
+            methods, but the difference is the transformation from the data in the reader to the desired type. What I first like to do 
+            is to clean up the actual iterating through rows, turning this into an IEnumerable. Like so:
+        </p>
+        <section>
+            <pre><code class="lang-csharp">private static IEnumerable<IDataRecord> EnumerateResults(SqlDataReader reader) {
+    if (reader.HasRows) {
+        while (reader.NextResult()) {
+            yield return reader;
+        }
+    }
+}</code></pre>
+        </section>
+        <p>
+            You may notice the type in the method signature is an IDataRecord and not the concrete type SqlDataReader. In my opinion 
+            SqlDataReader violates SRP, but the interfaces it implements let you break it apart into fairly isolated components. By choosing 
+            the resultant type to be IDataRecord, I'm forcing the consumer of this method to only use the IDataRecord components of the 
+            SqlDataReader and, more importantly, not the IDataReader components.
+        </p>
+        <p>
+            But now that we have the IEnumerable built up, we can just define transformation methods that take in an IDataRecord and spit out 
+            a domain type.
+        </p>
+        <section>
+            <pre><code class="lang-csharp">private static Customer ReadCustomer(IDataRecord record) {
+    int id = (int)record[0];
+    string firstName = (string)record[1];
+    string lastName = (string)record[2];
+    return new Customer(id, firstName, lastName);
+}
+
+private static Product ReadProduct(IDataRecord record) {
+    int id = (int)record[0];
+    string name = (string)record[1];
+    decimal price = (decimal)record[2];
+    return new Product(id, name, price);
+}</code></pre>
+        </section>
+        <p>
+            Now let's put it all together to create a higher-order, generic list method:
+        </p>
+        <section>
+            <pre><code class="lang-csharp">private static IEnumerable&gt;T&lt; List&gt;T&lt;(
+        string databaseName, 
+        string serverName, 
+        SqlCommand command, 
+        Func&gt;IDataRecord, T&lt; transformRecord) {
+    using SqlConnection conn = OpenConnection(databaseName, serverName);
+    using SqlCommand cmd = command.BindConnection(conn);
+    using SqlDataReader reader = cmd.ExecuteReader();
+    foreach (var item in EnumerateResults(reader)) {
+        yield return transformRecord(item);
+    }
+}</code></pre>
+        </section>
+        <p>
+            I can't just return EnumerateResults(reader).Select(transformRecord) because the reader the IEnumerable depends on would be disposed
+            before the results are consumed. This could be dodged with a collection, like a .ToArray() or similar, but then the entire collection
+            has to be pulled into memory before exiting the method. Up to you whether that's the right call.
+        </p>
+        <p>
+            Finally, we can implement our public List methods:
+        </p>
+        <section>
+            <pre><code class="lang-csharp">private static IEnumerable&lt;T&gt; List&lt;T&gt;(
+        string databaseName, 
+        string serverName, 
+        SqlCommand command, 
+        Func&lt;IDataRecord, T&gt; transformRecord) {
+    using SqlConnection conn = OpenConnection(databaseName, serverName);
+    using SqlCommand cmd = command.BindConnection(conn);
+    using SqlDataReader reader = cmd.ExecuteReader();
+    foreach (var item in EnumerateResults(reader)) {
+        yield return transformRecord(item);
+    }
+}</code></pre>
+        </section>
+        <section>
+            <pre><code class="lang-csharp">public static IEnumerable<Customer> ListCustomers(string databaseName, string serverName) =>
+    List(databaseName,
+        serverName,
+        ListCustomersSqlCommand(),
+        ReadCustomer);
+
+public static IEnumerable<Product> ListProducts(string databaseName, string serverName) =>
+    List(databaseName,
+        serverName,
+        ListProductsSqlCommand(),
+        ReadProduct);</code></pre>
+        </section>
+        <p>
+            Now every new ListXXX method that we create from here on can just call List with extra parameters.
+        </p>
+        <p>
+            It'd be totally fine to call it done right here, especially if there are only a few types that need listing for a single database type. 
+            For larger applications though, you may wish to take it further and expose a generic List&lt;T&gt; method to the consumer.
+        </p>
+        <h2>Taking it a Few Steps Further</h2>
+        <p>
+            We'll need a mechanism for the SQL layer getting a type and knowing how to get that type from the database. First, I'll implement how 
+            it's used, then I'll implement how it's created. I'm going to make this a non-static class with instance methods, we'll be building a 
+            data access layer up at runtime.
+        </p>
+        <section>
+            <pre><code class="lang-csharp">public class DataAccess{
+    private IReadOnlyDictionary&lt;Type, DataAccessRegistration&gt; Registrations { get; }
+    private string ConnectionString { get; }
+
+    internal DataAccess(
+            string databaseName,
+            string serverName,
+            IReadOnlyDictionary&lt;Type, DataAccessRegistration&gt; registrations) { 
+        ConnectionString = 
+            new SqlConnectionStringBuilder() {
+                InitialCatalog = databaseName,
+                DataSource = serverName,
+                IntegratedSecurity = true
+            }.ConnectionString;
+        Registrations = registrations;
+    }
+
+    public IEnumerable&lt;T&gt; List&lt;T&gt;() {
+        DataAccessRegistration&lt;T&gt; registration = GetRegistration&lt;T&gt;();
+        return List&lt;T&gt;(registration.GetSqlCommand(), registration.ReadRecord);
+    }
+
+    private DataAccessRegistration&lt;T&gt; GetRegistration&lt;T&gt;() =&gt;
+        Registrations.TryGetValue(typeof(T), out DataAccessRegistration registration)
+            ? registration.AsGeneric&lt;T&gt;()
+            : throw new KeyNotFoundException($&quot;Type {typeof(T).Name} not registered.&quot;);
+
+    private SqlConnection OpenConnection() {
+        SqlConnection conn = new SqlConnection(ConnectionString);
+        conn.Open();
+        return conn;
+    }
+
+    private IEnumerable&lt;IDataRecord&gt; EnumerateResults(SqlDataReader reader) {
+        if (reader.HasRows) {
+            while (reader.NextResult()) {
+                yield return reader;
+            }
+        }
+    }
+
+    private IEnumerable&lt;T&gt; List&lt;T&gt;(
+            SqlCommand command,
+            Func&lt;IDataRecord, T&gt; transformRecord) {
+        using SqlConnection conn = OpenConnection();
+        using SqlCommand cmd = command.BindConnection(conn);
+        using SqlDataReader reader = cmd.ExecuteReader();
+        foreach (var item in EnumerateResults(reader)) {
+            yield return transformRecord(item);
+        }
+    }
+}
+
+//Creating both a generic and non-generic version of this,
+// we need the nongeneric so we can store all the generics in the same collection
+// we need the generic so we can have type safety both when registering and executing the command
+internal record DataAccessRegistration(
+        Type RecordType,
+        Func&lt;SqlCommand&gt; GetSqlCommand,
+        Func&lt;IDataRecord, object&gt; ReadRecord) {
+    public DataAccessRegistration&lt;T&gt; AsGeneric&lt;T&gt;() =&gt;
+        RecordType.GetType() is T
+                ? new DataAccessRegistration&lt;T&gt;(GetSqlCommand, x =&gt; (T)ReadRecord(x))
+                : throw new InvalidCastException($&quot;Unable to cast {RecordType.GetType().Name} as {typeof(T).Name}&quot;);
+}
+
+internal record DataAccessRegistration&lt;T&gt;(
+        Func&lt;SqlCommand&gt; GetSqlCommand,
+        Func&lt;IDataRecord, T&gt; ReadRecord) {
+    public Type RecordType =&gt; typeof(T);
+    public DataAccessRegistration AsNongeneric() =&gt;
+        new DataAccessRegistration(
+                RecordType,
+                GetSqlCommand,
+                x =&gt; ReadRecord(x));
+}</code></pre>
+        </section>
+        <p>
+            With that, we need a way to build this DataAccess:
+        </p>
+        <section>
+            <pre><code class="lang-csharp">public class DataAccessBuilder {
+    private IDictionary&lt;Type, DataAccessRegistration&gt; Registrations { get; }
+
+    public DataAccessBuilder() { 
+        Registrations = new Dictionary&lt;Type, DataAccessRegistration&gt;();
+    }
+
+    public DataAccessBuilder Register&lt;T&gt;(
+            Func&lt;SqlCommand&gt; getCommand,
+            Func&lt;IDataRecord, T&gt; readRecord) =&gt;
+        Registrations.TryAdd(typeof(T), new DataAccessRegistration&lt;T&gt;(getCommand, readRecord).AsNongeneric())
+            ? this
+            : throw new RegistrationExistsException(typeof(T));
+
+    public DataAccess Build(string databaseName, string serverName) =&gt;
+        new DataAccess(
+            databaseName, 
+            serverName, 
+            new ReadOnlyDictionary&lt;Type, DataAccessRegistration&gt;(Registrations));
+}</code></pre>
+        </section>
+        <p>
+            Building an instance of DataAccess with the same List functionality then looks something like this:
+        </p>
+        <section>
+            <pre><code class="lang-csharp">private DataAccess Access { get; }
+public SqlFunctions_Advanced(string databaseName, string serverName) =&gt;
+    Access = BuildOrdersDataAccess(databaseName, serverName);
+
+private static DataAccess BuildOrdersDataAccess(string databaseName, string serverName) =&gt;
+    new DataAccessBuilder()
+    .Register(
+        ListCustomersSqlCommand,
+        ReadCustomer)
+    .Register(
+        ListProductsSqlCommand,
+        ReadProduct)
+    .Build(databaseName, serverName);
+
+public IEnumerable&lt;T&gt; List&lt;T&gt;() =&gt; Access.List&lt;T&gt;();
+
+private static SqlCommand ListCustomersSqlCommand() =&gt;
+    new SqlCommand(&quot;SELECT c.Id, c.FirstName, c.LastName FROM [dbo].[Customer] c&quot;);
+
+private static SqlCommand ListProductsSqlCommand() =&gt;
+    new SqlCommand(&quot;SELECT p.Id, p.[Name], p.Price FROM [dbo].[Products] p&quot;);
+
+private static Customer ReadCustomer(IDataRecord record) {
+    int id = (int)record[0];
+    string firstName = (string)record[1];
+    string lastName = (string)record[2];
+    return new Customer(id, firstName, lastName);
+}
+
+private static Product ReadProduct(IDataRecord record) {
+    int id = (int)record[0];
+    string name = (string)record[1];
+    decimal price = (decimal)record[2];
+    return new Product(id, name, price);
+}</code></pre>
+        </section>
+        <p>
+            So what do we gain here? If there are multiple different types of SQL databases that we need to interface with, all with their own 
+            schema, then we've just created a way to create a unique DataAccess instance for each one of them with very little code reuse. What 
+            do we lose? Compile-time type safety guarantees and some time, but not much else.
+        </p>
+        <p>
+            We can take this yet another step further if our application needs to interface with different SQL providers (MySql, PostgreSQL, etc) 
+            ut it's not terribly difficult to imagine what that looks like, we just inject some sort of connection factory into DataAccess that 
+            is responsible for spitting out IDbConnection instances. This would then make DataAccess fully unit testable since we'd be able to 
+            mock out the database connections.
+        </p>
+        <a href="./index.html">Back</a>
     </body>
 </html>

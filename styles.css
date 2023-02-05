@@ -1,9 +1,15 @@
 body {
-    margin-left: 25%;
-    margin-right:25%;
-    margin-top: 5%;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 5em;
+    padding-right: 5em;
+    margin-top: 3em;
+    margin-bottom: 15em;
     background-color: #262626;
-    color: #C5B8A1;
+    color: #d4ccbc;
+    min-width: 25em;
+    max-width: 50em;
+    font-size: larger;
 }
 
 a:visited, a:link {
@@ -14,6 +20,16 @@ a:hover {
     color: #d0e7eb;
 }
 
-p:has(+ pre) {
+pre {
+    white-space: pre-wrap;
+}
+
+section {
     background-color: #202020;
+    color: #afa085;
+    padding-top: 0.25em;
+    padding-bottom: 0.25em;
+    padding-left: 1em;
+    padding-right: 1em;
+    border-radius: 1em;
 }
