@@ -186,20 +186,6 @@ private static Product ReadProduct(IDataRecord record) {
             Finally, we can implement our public List methods:
         </p>
         <section>
-            <pre><code class="lang-csharp">private static IEnumerable&lt;T&gt; List&lt;T&gt;(
-        string databaseName, 
-        string serverName, 
-        SqlCommand command, 
-        Func&lt;IDataRecord, T&gt; transformRecord) {
-    using SqlConnection conn = OpenConnection(databaseName, serverName);
-    using SqlCommand cmd = command.BindConnection(conn);
-    using SqlDataReader reader = cmd.ExecuteReader();
-    foreach (var item in EnumerateResults(reader)) {
-        yield return transformRecord(item);
-    }
-}</code></pre>
-        </section>
-        <section>
             <pre><code class="lang-csharp">public static IEnumerable<Customer> ListCustomers(string databaseName, string serverName) =>
     List(databaseName,
         serverName,
