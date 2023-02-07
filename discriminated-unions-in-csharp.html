@@ -1,0 +1,318 @@
+<html>
+    <head>
+        <link rel="stylesheet" href="styles.css">
+        <title>ChefPancake Codes</title>
+    </head>
+    <body>
+        <h1>Discriminated Unions in C#</h1>
+        <p>
+            A very powerful concept in functional-focused programming languages is the Discriminated Union (DU), 
+            which is a type that can represent one of a different set of named types. This allows us to create a 
+            single type to encapsulate one of several options. In Algebraic type systems, this would be referred 
+            to as an OR type (where AND types are your usual classes and structs). 
+        </p>
+        <p>
+            A very common example of a DU is the Option type. In F#, this would be represented like so:
+        </p>
+        <section>
+            <pre><code class="lang-fsharp">type Option<'T> =
+    | Some of 'T
+    | None</code></pre>
+        </section>
+        <p>
+            An Option has one of two possible values, a "Some" of type T or a "None" with no type or value.
+        </p>
+        <p>
+            So what value do we get out of this? If we have functions/methods that have constraints on the data 
+            that comes in (say, an int parameter that must be more than 0), we can, instead of throwing an 
+            InvalidArgumentException, just return a None. If the constraints are satisfied, then the 
+            function/method can return whatever value would be expected. This makes it extremely clear to whoever
+            is using this method that the function/method may not always return a good value and that the 
+            consumer must handle the possibility that None was returned.
+        </p>
+        <p>
+            This is of course just one application of a DU, but it's enough of a reason to want to build this in 
+            your C# applications. DUs are not directly supported, so there are workarounds needed to not only 
+            have the same either-or encapsulation but the same value.
+        </p>
+        <p>
+            Let's first start with a simple, contrived C# example. We'll create a divide by method that divides 
+            an int by another and returns a Some of that value or returns a None if the divisor input is a zero. 
+            I'm a huge fan of extension methods, so I'll build just that.
+        </p>
+        <p>
+            So let's start with what we know. Since we can't have a type be more than one type, we'll need a 
+            container to hold both options:
+        </p>
+        <section>
+            <pre><code class="lang-csharp">public class Option<T> { 
+    public T Value { get; init; }
+    public bool HasValue { get; init; }
+}
+
+public static class IntExtensions {
+    public static Option<int> DivideBy(this int x, int y) =>
+        y == 0
+        ? new Option<int>() { HasValue = false }
+        : new Option<int>() { HasValue = true, Value = x / y };
+}
+
+[TestClass]
+public class SimpleUnitTests {
+    [TestMethod]
+    public void DivideByNonZero_IsSome() {
+        int dividend = 16;
+        int divisor = 3;
+
+        Option<int> quotientOption = dividend.DivideBy(divisor);
+
+        Assert.AreEqual(quotientOption.HasValue, true);
+        Assert.AreEqual(quotientOption.Value, 5);
+    }
+
+    [TestMethod]
+    public void DivideByZero_IsNone() {
+        int dividend = 16;
+        int divisor = 0;
+
+        Option<int> quotientOption = dividend.DivideBy(divisor);
+
+        Assert.AreEqual(quotientOption.HasValue, false);
+        Assert.AreEqual(quotientOption.Value, default);
+    }
+}</code></pre>
+        </section>
+        <p>
+            This will do the job, but there's a few issues. Obviously (or not) the author of this type knows how 
+            this type is meant to be used, but that hasn't been communicated at all to the client of this 
+            library. Whoever instantiates an Option<T> has the ability to set HasValue to true and not provide a
+            value or they can set HasValue to false and provide a value. We can update this to use constructors, 
+            and if we use static constructors then we can convey the meaning to the consumer of the library. So, 
+            we'll remove the inits, hide the default constructor, and create the static methods like so:
+        </p>
+        <section>
+            <pre><code class="lang-csharp">public class Option<T> {
+    public T Value { get; }
+    public bool HasValue { get; }
+
+    private Option(T value, bool hasValue) {
+        Value = value;
+        HasValue = hasValue;
+    }
+
+    public static Option<T> Some(T value) =>
+        new Option<T>(value, true);
+
+    public static Option<T> None() =>
+        new Option<T>(default, false);
+}
+
+public static class StaticCtorsIntExtensions {
+    public static Option<int> DivideBy(this int x, int y) =>
+        y == 0
+        ? Option<int>.None()
+        : Option<int>.Some(x / y);
+}</code></pre>
+        </section>
+        <p>
+            This is better. Now, consumers of our Option type are incapable of creating one in an 'illegal' state: 
+            it either has a value and HasValue is true, or it doesn't have a value (Value = default) and HasValue is 
+            false. And again, the names in the static ctors convey meaning about how the type is meant to be used and 
+            is thus self-documenting. 
+        </p>
+        <p>
+            But there's one more issue. We've limited how we can create our type, but we have no limits on how the 
+            type can be used afterwards. Consumers of this type can access the Value property regardless of how the 
+            type was created. We'd like to not allow that, we want the way the type is used to mirror how it was 
+            created. We can do so by creating a higher-order function that takes in handlers for each possible 
+            outcome of the type. Like so:
+        </p>
+        <section>
+            <pre><code class="lang-csharp">public record Option<T> {
+    private T Value { get; }
+    private bool HasValue { get; }
+
+    private Option(T value, bool hasValue) {
+        Value = value;
+        HasValue = hasValue;
+    }
+
+    public static Option<T> Some(T value) =>
+        new Option<T>(value, true);
+
+    public static Option<T> None() =>
+        new Option<T>(default, false);
+
+    public void Unwrap(
+            Action<T> onIsSome, 
+            Action onIsNone) {
+        if (HasValue) {
+            onIsSome(Value);
+        } else {
+            onIsNone();
+        }
+    }
+}
+
+[TestClass]
+public class UnwrapTests {
+    [TestMethod]
+    public void DivideByNonZero_IsSome() {
+        int dividend = 16;
+        int divisor = 3;
+        bool wasTested = false;
+
+        Option<int> quotientOption = dividend.DivideBy(divisor);
+
+        quotientOption.Unwrap(
+            x => {
+                Assert.AreEqual(x, 5);
+                wasTested = true;
+            },
+            () => Assert.Fail());
+        Assert.IsTrue(wasTested);
+    }
+
+    [TestMethod]
+    public void DivideByZero_IsNone() {
+        int dividend = 16;
+        int divisor = 0;
+        bool wasTested = false;
+
+        Option<int> quotientOption = dividend.DivideBy(divisor);
+
+        quotientOption.Unwrap(
+            x => Assert.Fail(),
+            () => wasTested = true);
+        Assert.IsTrue(wasTested);
+    }
+}</code></pre>
+        </section>
+        <p>
+            And there we go. The unit tests can look a little funky; just because we provided actions to a method is
+            not a guarantee that it will be run, so we include the wasTested bool variable to track that we did 
+            indeed execute the leg we expected. In practice, you'd only have to do this in your unit test suite for 
+            the Option type itself, but I just wanted to call this out.
+        </p>
+        <p>
+            We can also fluff out the Option type with a few extra goodies, including some higher-order methods that 
+            are commonly seen in other languages that include the Option type in their standard lib, namely Map and 
+            Bind. These will help when building out code that may not know or care about values that came from 
+            Options without having to Unwrap every option after it's returned from a method. Using even more 
+            contrived examples:
+        </p>
+        <section>
+            <pre><code class="lang-csharp">public record Option<T> {
+        private T Value { get; }
+        private bool HasValue { get; }
+    
+        private Option(T value, bool hasValue) {
+            Value = value;
+            HasValue = hasValue;
+        }
+    
+        public static Option<T> Some(T value) =>
+            new Option<T>(value, true);
+    
+        public static Option<T> None() =>
+            new Option<T>(default, false);
+    
+        public void Unwrap(
+                Action<T> onIsSome,
+                Action onIsNone) { 
+            if (HasValue) {
+                onIsSome(Value);
+            } else {
+                onIsNone();
+            }   
+        }
+    
+        public TOut Unwrap<TOut>(
+                Func<T, TOut> onIsSome,
+                Func<TOut> onIsNone) =>
+            HasValue
+            ? onIsSome(Value)
+            : onIsNone();
+    
+        public static Func<Option<TIn>, Option<TOut>> Map<TIn, TOut>(Func<TIn, TOut> f) =>
+            x => x.Unwrap(
+                y => Option<TOut>.Some(f(y)),
+                () => Option<TOut>.None());
+    
+        public static Func<Option<TIn>, Option<TOut>> Bind<TIn, TOut>(Func<TIn, Option<TOut>> f) =>
+            x => x.Unwrap(
+                y => f(y),
+                () => Option<TOut>.None());
+    }
+    
+    public static class OptionExtensions {
+        public static Func<Option<TIn>, Option<TOut>> OptionMap<TIn, TOut>(this Func<TIn, TOut> f) =>
+            Option<TOut>.Map(f);
+    
+        public static Func<Option<TIn>, Option<TOut>> OptionBind<TIn, TOut>(this Func<TIn, Option<TOut>> f) =>
+            Option<TOut>.Bind(f);
+    }
+    
+    public static class UnwrapIntExtensions {
+        public static Option<int> DivideBy(this int x, int y) =>
+                y == 0
+                ? Option<int>.None()
+                : Option<int>.Some(x / y);
+    
+        public static int AddBy(this int x, int y) =>
+            x + y;
+    
+        public static int SubtractBy(this int x, int y) =>
+            x - y;
+    
+        public static int MultiplyBy(this int x, int y) =>
+            x * y;
+    
+        public static Option<int> OptionDivideBy(this Option<int> x, int y) =>
+            Option<int>.Bind<int, int>(z => z.DivideBy(y))(x);
+    
+        public static Option<int> OptionAddBy(this Option<int> x, int y) =>
+            Option<int>.Map<int, int>(z => z.AddBy(y))(x);
+    
+        public static Option<int> OptionSubtractBy(this Option<int> x, int y) =>
+            Option<int>.Map<int, int>(z => z.SubtractBy(y))(x);
+    
+        public static Option<int> OptionMultiplyBy(this Option<int> x, int y) =>
+            Option<int>.Map<int, int>(z => z.MultiplyBy(y))(x);
+    }
+    
+    [TestMethod]
+    public void AddThenDivideThenSubtractThenDivide_IsSome() {
+        int baseValue = 50;
+        int addByValue = 10;
+        int divideByValue = 4;
+        int subtractByValue = 2;
+        int expected = 3;
+    
+        Option<int> resultOption =
+            baseValue
+            .AddBy(addByValue)
+            .DivideBy(divideByValue)
+            .OptionSubtractBy(subtractByValue)
+            .OptionDivideBy(divideByValue);
+    
+        resultOption.Unwrap(
+            x => Assert.AreEqual(expected, x),
+            () => Assert.Fail());
+    }</code></pre>
+        </section>
+        <p>
+            Those extension methods get gross. Admittedly, these are a lot cleaner in F# where everything is a 
+            function and you can just Option.Map that function right when you need it instead of having to define it
+            before-hand. But shunting all that icky code off to extensions land really cleans up the rest of your 
+            code quite nicely and you can get closer to having your methods read like plain English. For me, that is 
+            the ultimate goal.
+        </p>
+        <p>
+            The code for the above can be found on <a href="https://github.com/ChefPancake/BlogPostDemos/tree/main/DiscriminatedUnionDemo">my Github</a>.
+        </p>
+    </body>
+    <footer>
+        <a href="./index.html">Back</a>
+    </footer>
+</html>
